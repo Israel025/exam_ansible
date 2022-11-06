@@ -1,0 +1,281 @@
+---
+- name: Setup Remote Server & LAMP with Ansible
+  hosts: jammy_local
+  #become_user: root
+  become: true
+  become_method: sudo
+  vars_files:
+    - vars/variables.yml
+
+  tasks:
+  - name: Update apt packages
+    apt:
+      update_cache: yes
+      autoclean: yes
+      autoremove: yes
+  
+  - name: set timezone to Africa/lagos
+    timezone:
+      name: Africa/Lagos
+  
+  - name: Install Packages
+    package:
+      name: "{{ packages }}"
+      state: present
+
+  - name: Check Apache Installation
+    ansible.builtin.shell: systemctl status apache2
+    register: replyap
+
+  - name: Confirm Apache Installation
+    ansible.builtin.debug:
+      msg: Apache loaded successfully
+    when: replyap.stdout.find("active (running)") != -1
+
+  - name: Install Required PHP dependencies
+    package:
+      name: "{{ php_dep }}"
+      state: present
+  
+  - name: Add Apt Repo for PHP
+    command: sudo add-apt-repository -y ppa:ondrej/php
+  
+  - name: Update apt 
+    apt:
+      update_cache: yes
+      autoclean: yes
+
+  - name: Install PHP
+    command: sudo apt install php8.1 -y
+  
+  - name: Update apt
+    apt:
+      update_cache: yes
+      autoclean: yes 
+
+  - name: Install PHP Modules
+    package:
+      name: "{{ php_mods }}"
+      state: present
+    #ignore_errors: yes
+  
+  - name: Check PHP version
+    ansible.builtin.shell: php -v
+    register: replyph
+
+  - name: Confirm PHP installation
+    ansible.builtin.debug:
+      msg: PHP installed successfully
+    when: replyph.stdout.find("command not found") == -1
+  
+  # Firewall allow rules  
+  - name: Allow HTTP
+    community.general.ufw:
+        rule: allow
+        port: "80"
+        proto: tcp
+
+  - name: Allow HTTPS
+    community.general.ufw:
+      rule: allow
+      port: "443"
+      proto: tcp
+      
+  - name: Allow SSH
+    community.general.ufw:
+      rule: allow
+      port: "22"
+      proto: tcp
+
+  - name: Allow MySQL
+    community.general.ufw:
+      rule: allow
+      port: "3306"
+      proto: tcp
+
+  - name: Update "apt" 
+    apt:
+      update_cache: yes
+      autoclean: yes
+      autoremove: yes
+
+  - name: Installing Mysql and dependencies
+    package:
+      name: "{{ mysql_pack }}"
+      state: present
+      update_cache: yes
+    become: yes
+
+  - name: start and enable mysql service
+    service:
+      name: mysql
+      state: started
+      enabled: yes
+  
+  - name: copy my.cnf
+    copy:
+      src: templates/my.cnf
+      dest: /root/my.cnf
+      mode: 0644
+
+  - name: Reload all Privileges
+    command: mysql --user root --password={{ db_pword }} --execute="FLUSH PRIVILEGES;"
+
+  - name: Set MySQL root Password
+    mysql_user:
+      login_host: localhost
+      login_user: root
+      login_password: "{{ mysql_pass }}"
+      name: root
+      password: "{{ mysql_pass }}"
+      state: present
+      priv: '*.*:ALL,GRANT'
+
+  - name: Removes all anonymous user accounts
+    mysql_user:
+      login_user: root
+      login_password: "{{ mysql_pass }}"
+      name: ''
+      host_all: yes
+      state: absent
+
+  - name: creating mysql user (admin)
+    mysql_user:
+      login_user: root
+      login_password: "{{ mysql_pass }}"
+      name: "{{ db_user }}"
+      password: "{{ db_pword }}"
+      priv: '*.*:ALL'
+      host: '%'
+      state: present
+
+  - name: creating megait_db
+    mysql_db:
+      login_user: root
+      login_password: "{{ mysql_pass }}"
+      name: "{{ db_name }}"
+      state: present  
+
+  - name: Ensure the created User Uses the database
+    command: mysql --user root --password={{ mysql_pass }} --execute="USE megait_db;"
+
+  - name: Remove the MySQL Test Database
+    mysql_db:
+      login_user: root
+      login_password: "{{ mysql_pass }}"
+      name: test
+      state: absent
+
+#
+  - name: Create megait directory
+    ansible.builtin.file:
+      path: /var/www/megait
+      state: directory
+      #mode: '0755'
+  
+  - name: Clone project to new dir
+    ansible.builtin.git:
+      repo: https://github.com/f1amy/laravel-realworld-example-app.git
+      dest: /var/www/megait
+      clone: yes
+      update: no
+
+  - name: Create the web.php routes file
+    ansible.builtin.copy:
+      src: templates/web.php
+      dest: /var/www/megait/routes/web.php
+      #owner: foo
+  
+  - name: Set the app .env file
+    ansible.builtin.copy:
+      src: templates/.env
+      dest: /var/www/megait/.env
+      #owner: foo
+
+# setting up Composer
+  - name: Download Composer Installer
+    command: curl -sS https://getcomposer.org/installer -o /tmp/composer-setup.php
+
+  # - name: Store Composer Installer latest hash in a shell variable
+  #  command: HASH=`curl -sS https://composer.github.io/installer.sig`
+
+  - name: store hash
+    ansible.builtin.shell: curl -sS https://composer.github.io/installer.sig
+    register: comphash
+
+  - name: Verify Installation Script
+    command: php -r "if (hash_file('SHA384', '/tmp/composer-setup.php') === 'comphash') { echo 'Installer verified'; } else { echo 'Installer corrupt'; unlink('composer-setup.php'); } echo PHP_EOL;"
+  
+  - name: Install Composer Globally
+    command: sudo php /tmp/composer-setup.php --install-dir=/usr/local/bin --filename=composer
+  
+  - name: Make composer executable by user
+    file:
+      path: /usr/local/bin/composer
+      mode: '755'
+
+  - name: Download and install all composer requirements
+    shell: composer install --no-interaction --no-dev --prefer-dist
+    args:
+      chdir: /var/www/megait
+
+  # other settings 
+  - name: Run the php artisan commands
+    command: chdir=/var/www/megait {{ item }}
+    with_items:
+      - php artisan key:generate
+      - php artisan config:cache
+      - php artisan migrate:fresh
+      #- php artisan migrate --seed
+    #ignore_errors: yes
+  
+  - name: Update composer
+    shell: composer update --no-interaction --no-dev --prefer-dist
+    args:
+      chdir: /var/www/megait
+
+  - name: Set Apache virtual host config file
+    ansible.builtin.copy:
+      src: templates/megait.conf
+      dest: /etc/apache2/sites-available/megait.conf
+      #owner: foo
+
+  - name: Enable the Apache rewrite module and activate the Laravel virtual host
+    command: "{{ item }}"
+    with_items:
+      - a2enmod rewrite
+      - a2dissite 000-default.conf
+      - a2ensite megait.conf
+    #ignore_errors: yes
+
+  - name: Change file ownership, group and permissions
+    ansible.builtin.file:
+      path: /var/www/megait
+      state: directory
+      recurse: yes
+      owner: www-data
+      group: www-data
+      mode: '775'
+
+  - name: Restart apache web server
+    ansible.builtin.command: systemctl restart apache2
+  
+  - name: Secure the App
+    command: "{{ item }}"
+    with_items:
+      - sudo apt update
+      - sudo apt install snapd -y
+      - sudo snap install core
+      - sudo snap refresh core
+      - sudo snap install --classic certbot
+      - sudo ln -s /snap/bin/certbot /usr/bin/certbot
+    #ignore_errors: yes
+  
+  - name: Install SSL certificate
+    command: sudo certbot --apache --agree-tos --non-interactive --redirect -m israeltademola@gmail.com.com -d megaitservices.com.ng -d www.megaitservices.com.ng
+    #ignore_errors: yes
+
+  - name: PostgreSQL Installation
+    ansible.builtin.script: postgres.sh
+    args:
+      chdir: /home/ubuntu/
