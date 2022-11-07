@@ -1,7 +1,6 @@
 ---
 - name: Setup Remote Server & LAMP with Ansible
-  hosts: jammy_local
-  #become_user: root
+  hosts: ansible_slave
   become: true
   become_method: sudo
   vars_files:
@@ -69,29 +68,25 @@
     when: replyph.stdout.find("command not found") == -1
   
   # Firewall allow rules  
-  - name: Allow HTTP
-    community.general.ufw:
-        rule: allow
-        port: "80"
-        proto: tcp
-
-  - name: Allow HTTPS
+  - name: Allow Open SSH
     community.general.ufw:
       rule: allow
-      port: "443"
-      proto: tcp
-      
-  - name: Allow SSH
+      name: OpenSSH
+   
+  - name: Allow Apache Full
     community.general.ufw:
       rule: allow
-      port: "22"
-      proto: tcp
-
+      name: 'Apache Full'
+  
   - name: Allow MySQL
     community.general.ufw:
       rule: allow
       port: "3306"
       proto: tcp
+  
+  - name: enable UFW
+    community.general.ufw:
+      state: enabled
 
   - name: Update "apt" 
     apt:
