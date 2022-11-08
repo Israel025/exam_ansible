@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Install required software packages.
 echo "Installing requirements ============="
@@ -15,7 +15,6 @@ sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs
 # Update apt
 echo "Updating apt info ===================="
 sudo apt update -y
-#sudo apt upgrade -y
 
 # PostgreSQL installation
 echo "Installing PostgreSQL =================="
@@ -25,9 +24,13 @@ sudo apt install postgresql postgresql-contrib -y
 echo "Ensuring PostgreSQL service is started ================"
 sudo systemctl start postgresql.service
 
-# Setting up a new role:
-#echo "Creating a role for the user ================"
-#sudo -u postgres psql --file=templates/create_user.sql
+# Setting up a new role/user:
+echo "Creating a new role/user ================"
+createuser -s $whoami
+
+# Setting up a new db:
+echo "Creating a new database ================"
+createdb newdb
 
 # Setting up Postgres
 echo "Uncomment and edit the listen_addresses attribute ==============="

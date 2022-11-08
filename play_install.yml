@@ -1,8 +1,7 @@
 ---
 - name: Setup Remote Server & LAMP with Ansible
   hosts: ansible_slave
-  become: true
-  become_method: sudo
+  remote_user: ubuntu
   vars_files:
     - vars/variables.yml
 
@@ -13,47 +12,30 @@
       update_cache: yes
       autoclean: yes
       autoremove: yes
+    become: true
   
   # Setting the server's time to Lagos'
   - name: set timezone to Africa/lagos
     timezone:
       name: Africa/Lagos
-
-  # Checking the server's hostname
-  - name: Checking Server hostname
-    ansible.builtin.shell: hostname
-    register: host_name
-
-  # Message Confirming server hostname
-  - name: Confirm Hostname
-    ansible.builtin.debug:
-      msg: {{ host_name }}
-  
-   # Checking the server's user
-  - name: Checking Server user
-    ansible.builtin.shell: whoami
-    register: user_name
-
-  # Message Confirming server user
-  - name: Confirm User
-    ansible.builtin.debug:
-      msg: {{ user_name }}
+    become: true
 
   # Installing required packages and apache2
   - name: Install Packages
     package:
       name: "{{ packages }}"
       state: present
+    become: true
 
   # Checking Apache2 installation status
   - name: Check Apache2 Installation
-    ansible.builtin.shell: systemctl status apache2
+    ansible.builtin.shell: sudo systemctl status apache2
     register: replyap
   
   # A Message to confirm Apache2 status
   - name: Confirm Apache2 Installation
     ansible.builtin.debug:
-      msg: Apache loaded successfully
+      msg: Apache installed and loaded successfully
     when: replyap.stdout.find("active (running)") != -1
   
   # Installing all of the specified PHP dependencies
@@ -61,6 +43,7 @@
     package:
       name: "{{ php_dep }}"
       state: present
+    become: true
   
   # Adding PHP repository
   - name: Add Apt Repo for PHP
@@ -71,6 +54,7 @@
     apt:
       update_cache: yes
       autoclean: yes
+    become: true
   
   # Installing PHP
   - name: Install PHP
@@ -81,19 +65,21 @@
     apt:
       update_cache: yes
       autoclean: yes 
+    become: true
   
   # Installing defined PHP modules
   - name: Install PHP Modules
     package:
       name: "{{ php_mods }}"
       state: present
+    become: true
   
   # Checking PHP version 
   - name: Check PHP version
     ansible.builtin.shell: php -v
     register: replyph
   
-  # A message to PHP version 
+  # A message to confirm PHP version 
   - name: Confirm PHP installation
     ansible.builtin.debug:
       msg: PHP installed successfully
@@ -104,12 +90,14 @@
     community.general.ufw:
       rule: allow
       name: OpenSSH
+    become: true
   
   # Firewall allow rule for Apache Full
   - name: Allow Apache Full
     community.general.ufw:
       rule: allow
       name: 'Apache Full'
+    become: true
   
   # Firewall allow rule for MySQL port
   - name: Allow MySQL
@@ -117,11 +105,13 @@
       rule: allow
       port: "3306"
       proto: tcp
+    become: true
   
   # Enabling Firewall
   - name: enable UFW
     community.general.ufw:
       state: enabled
+    become: true
   
   # Updating apt repos
   - name: Update "apt" 
@@ -129,6 +119,7 @@
       update_cache: yes
       autoclean: yes
       autoremove: yes
+    become: true
   
   # Installation of dependencies for MySQL
   - name: Installing Mysql and dependencies
@@ -136,7 +127,7 @@
       name: "{{ mysql_pack }}"
       state: present
       update_cache: yes
-    become: yes
+    become: true
   
   # Starting and enabling MySQL service
   - name: start and enable mysql service
@@ -144,6 +135,7 @@
       name: mysql
       state: started
       enabled: yes
+    become: true
   
   # Allowing for password as an authentication for MySQL
   - name: copy my.cnf
@@ -151,10 +143,11 @@
       src: templates/my.cnf
       dest: /root/my.cnf
       mode: 0644
+    become: true
   
   # Reloading set privileges
   - name: Reload all Privileges
-    command: mysql --user root --password={{ db_pword }} --execute="FLUSH PRIVILEGES;"
+    command: sudo mysql --user root --password={{ db_pword }} --execute="FLUSH PRIVILEGES;"
   
   # Setting up MySQL root password
   - name: Set MySQL root Password
@@ -166,6 +159,7 @@
       password: "{{ mysql_pass }}"
       state: present
       priv: '*.*:ALL,GRANT'
+    become: true
   
   # Removing anonymous users from the MySQL DB
   - name: Removes all anonymous user accounts
@@ -212,6 +206,7 @@
     ansible.builtin.file:
       path: /var/www/megait
       state: directory
+    become: true
   
   # Cloning the github repo to the created directory
   - name: Clone project to the Megait directory
@@ -220,18 +215,21 @@
       dest: /var/www/megait
       clone: yes
       update: no
+    become: true
   
   # Created route for the app 
   - name: Create the web.php routes file
     ansible.builtin.copy:
       src: templates/web.php
       dest: /var/www/megait/routes/web.php
+    become: true
   
   # Setting the environment file for the app
   - name: Set the app .env file
     ansible.builtin.copy:
       src: templates/.env
       dest: /var/www/megait/.env
+    become: true
 
   # Downloading composer installer and renaming it as  composer-setup.php
   - name: Download Composer Installer
@@ -255,10 +253,11 @@
     file:
       path: /usr/local/bin/composer
       mode: '755'
+    become: true
   
   # Downloading and installation of composer and all repuirements
   - name: Download and install all composer requirements
-    shell: composer install --no-interaction --no-dev --prefer-dist
+    shell: sudo composer install --no-interaction --no-dev --prefer-dist
     args:
       chdir: /var/www/megait
 
@@ -269,11 +268,18 @@
       - php artisan key:generate
       - php artisan config:cache
       - php artisan migrate:fresh
-      #- php artisan migrate --seed
+    become: true
+    
+  - name: Run the php artisan migrate seed command and ignore errors
+    ansible.builtin.shell: php artisan migrate --seed
+    args:
+      chdir: /var/www/megait
+    become: true
+    ignore_errors: yes
    
   # Updating composer
   - name: Update composer
-    shell: composer update --no-interaction --no-dev --prefer-dist
+    shell: sudo composer update --no-interaction --no-dev --prefer-dist
     args:
       chdir: /var/www/megait
   
@@ -282,6 +288,7 @@
     ansible.builtin.copy:
       src: templates/megait.conf
       dest: /etc/apache2/sites-available/megait.conf
+    become: true
 
   # Enable the Apache rewrite module and activate the Laravel virtual host
   - name: Enable the Apache rewrite & activate Laravel virtual host
@@ -290,7 +297,7 @@
       - a2enmod rewrite
       - a2dissite 000-default.conf
       - a2ensite megait.conf
-    #ignore_errors: yes
+    become: true
 
   # Changing the file ownership, group and permissions
   - name: Change file permissions
@@ -301,10 +308,11 @@
       owner: www-data
       group: www-data
       mode: '775'
+    become: true
 
   # Restarting apache web server 
   - name: Restart apache web server
-    ansible.builtin.command: systemctl restart apache2
+    ansible.builtin.command: sudo systemctl restart apache2
   
   # Installing the requirements for adding SSL to the app
   - name: Setting up SSL Requirements 
@@ -315,16 +323,38 @@
       - sudo snap install core
       - sudo snap refresh core
       - sudo snap install --classic certbot
-      - sudo ln -s /snap/bin/certbot /usr/bin/certbot
-    #ignore_errors: yes
+      #- sudo ln -s /snap/bin/certbot /usr/bin/certbot
+  
+  # Checking and the creation of certbot symbolic link
+  - name: Check/Creating certbot symbolic link
+    ansible.builtin.command: sudo ln -s /snap/bin/certbot /usr/bin/certbot
+    register: link_exist
+    ignore_errors: yes
+    
+  # Show message to confirm the already existence of certbot symbolic link
+  - name: Message to confirm certbot symbolic link existence
+    ansible.builtin.debug:
+      msg: Certbot symbolic link already created
+    when: link_exist is failed    
   
   # Installing an SSL certificate for the app
   - name: Install SSL certificate
     command: sudo certbot --apache --agree-tos --non-interactive --redirect -m israeltademola@gmail.com.com -d megaitservices.com.ng -d www.megaitservices.com.ng
-    #ignore_errors: yes
+    ignore_errors: yes
   
+   # Checking the server's user
+  - name: Checking Server user
+    ansible.builtin.shell: whoami
+    register: user_name
+
+  # Message Confirming server user
+  - name: Confirm User
+    ansible.builtin.debug:
+      msg: "{{user_name.stdout}}"
+    
   # Using a bash script to install PostgreSQL
   - name: PostgreSQL Installation
-    ansible.builtin.script: postgres.sh
+    ansible.builtin.script: psql_script.sh
     args:
-      chdir: /home/ubuntu/
+      chdir: /home/{{user_name.stdout}}/
+    become: true
